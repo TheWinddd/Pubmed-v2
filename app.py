@@ -1048,9 +1048,13 @@ else:
         keep = ["keyword"] + [c for c in selected_cols if c in df_all.columns]
         df_all = df_all[keep] if not df_all.empty else df_all
         
-        # Deduplicate by PMID
-        if "pmid" in df_all.columns and not df_all.empty:
-            df_all = df_all.drop_duplicates(subset=["pmid"], keep="first").reset_index(drop=True)
+        # Deduplicate within each keyword (không loại bỏ bài trùng giữa các từ khóa)
+        if {"pmid", "keyword"}.issubset(df_all.columns) and not df_all.empty:
+            df_all = (
+                df_all
+                .drop_duplicates(subset=["keyword", "pmid"], keep="first")
+                .reset_index(drop=True)
+            )
         
         st.session_state["df_all"] = df_all
         st.success(f"✅ Đã tải xong {len(df_all)} bài báo!")
@@ -1103,7 +1107,33 @@ if df_all is not None and not df_all.empty:
             from pandas import ExcelWriter
             xbuf = io.BytesIO()
             with ExcelWriter(xbuf, engine="openpyxl") as writer:
-                df_all.to_excel(writer, index=False, sheet_name="PubMed_Data")
+                # Sheet tổng hợp tất cả từ khóa
+                df_all.to_excel(writer, index=False, sheet_name="All_Keywords")
+
+                # Mỗi từ khóa một sheet riêng
+                if "keyword" in df_all.columns:
+                    used_names = set()
+
+                    def make_sheet_name(raw_kw: str) -> str:
+                        """Tạo tên sheet an toàn (<=31 ký tự, không trùng)."""
+                        base = str(raw_kw).strip() or "Keyword"
+                        # Giới hạn 25 ký tự để còn chỗ cho hậu tố _1, _2...
+                        base = base[:25]
+                        name = base
+                        i = 1
+                        while name in used_names:
+                            name = f"{base}_{i}"
+                            # Đảm bảo không vượt 31 ký tự
+                            if len(name) > 31:
+                                name = name[:31]
+                            i += 1
+                        used_names.add(name)
+                        return name
+
+                    for kw, df_kw in df_all.groupby("keyword"):
+                        sheet_name = make_sheet_name(kw)
+                        df_kw.to_excel(writer, index=False, sheet_name=sheet_name)
+
             st.download_button(
                 "⬇️ Tải XLSX",
                 data=xbuf.getvalue(),
