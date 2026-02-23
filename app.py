@@ -546,6 +546,50 @@ def get_theme_css():
                 color: #fafafa !important;
             }
             
+            /* Expander content area */
+            .stExpander [data-testid="stExpanderDetails"],
+            [data-testid="stExpander"] [data-testid="stExpanderDetails"],
+            .stExpander > div:last-child {
+                background-color: #1a1d24 !important;
+                color: #fafafa !important;
+            }
+            
+            /* ===== FILE UPLOADER ===== */
+            .stFileUploader,
+            [data-testid="stFileUploader"],
+            .stFileUploader > div,
+            [data-testid="stFileUploader"] > div {
+                background-color: #1a1d24 !important;
+                color: #fafafa !important;
+            }
+            
+            .stFileUploader [data-testid="stFileUploaderDropzone"],
+            [data-testid="stFileUploaderDropzone"],
+            .stFileUploader section,
+            .stFileUploader section > div {
+                background-color: #262730 !important;
+                color: #fafafa !important;
+                border: 1px dashed #3d4251 !important;
+                border-radius: 8px !important;
+            }
+            
+            .stFileUploader section button,
+            [data-testid="stFileUploaderDropzone"] button,
+            .stFileUploader [data-testid="baseButton-secondary"] {
+                background-color: #3d4251 !important;
+                color: #fafafa !important;
+                border: 1px solid #4da6ff !important;
+            }
+            
+            .stFileUploader small,
+            .stFileUploader span,
+            .stFileUploader p,
+            .stFileUploader label,
+            [data-testid="stFileUploaderDropzone"] span,
+            [data-testid="stFileUploaderDropzone"] small {
+                color: #b0b0b0 !important;
+            }
+            
             /* ===== PROGRESS BAR ===== */
             .stProgress > div > div {
                 background-color: #4da6ff !important;
@@ -808,6 +852,50 @@ def get_theme_css():
                 color: #212529 !important;
             }
             
+            /* Expander content area */
+            .stExpander [data-testid="stExpanderDetails"],
+            [data-testid="stExpander"] [data-testid="stExpanderDetails"],
+            .stExpander > div:last-child {
+                background-color: #ffffff !important;
+                color: #212529 !important;
+            }
+            
+            /* ===== FILE UPLOADER ===== */
+            .stFileUploader,
+            [data-testid="stFileUploader"],
+            .stFileUploader > div,
+            [data-testid="stFileUploader"] > div {
+                background-color: #ffffff !important;
+                color: #212529 !important;
+            }
+            
+            .stFileUploader [data-testid="stFileUploaderDropzone"],
+            [data-testid="stFileUploaderDropzone"],
+            .stFileUploader section,
+            .stFileUploader section > div {
+                background-color: #f8f9fa !important;
+                color: #212529 !important;
+                border: 1px dashed #dee2e6 !important;
+                border-radius: 8px !important;
+            }
+            
+            .stFileUploader section button,
+            [data-testid="stFileUploaderDropzone"] button,
+            .stFileUploader [data-testid="baseButton-secondary"] {
+                background-color: #e9ecef !important;
+                color: #212529 !important;
+                border: 1px solid #dee2e6 !important;
+            }
+            
+            .stFileUploader small,
+            .stFileUploader span,
+            .stFileUploader p,
+            .stFileUploader label,
+            [data-testid="stFileUploaderDropzone"] span,
+            [data-testid="stFileUploaderDropzone"] small {
+                color: #6c757d !important;
+            }
+            
             /* ===== PROGRESS BAR ===== */
             .stProgress > div > div {
                 background-color: #1e88e5 !important;
@@ -870,6 +958,7 @@ if "df_all" not in st.session_state:
 # ============== SECTION 1: Keywords Input ==============
 st.markdown('<div class="section-header">1. Từ khóa tìm kiếm</div>', unsafe_allow_html=True)
 
+# --- Row 1: Manual input + Add button ---
 col_input, col_add = st.columns([4, 1])
 with col_input:
     new_keyword = st.text_input(
@@ -883,8 +972,76 @@ with col_add:
             st.session_state["keywords_list"].append(new_keyword.strip())
             st.rerun()
 
+# --- Row 2: Import from Excel file ---
+with st.expander("📄 Import từ khóa từ file Excel", expanded=False):
+    st.markdown(
+        "Upload file Excel (`.xlsx` / `.xls`). Ứng dụng sẽ đọc **tất cả giá trị từ cột A** "
+        "(bỏ qua dòng tiêu đề nếu có) và thêm vào danh sách từ khóa."
+    )
+    
+    uploaded_file = st.file_uploader(
+        "Chọn file Excel",
+        type=["xlsx", "xls"],
+        label_visibility="collapsed",
+        key="excel_keyword_uploader",
+    )
+    
+    col_import_opts1, col_import_opts2 = st.columns(2)
+    with col_import_opts1:
+        skip_header = st.checkbox("Bỏ qua dòng đầu tiên (tiêu đề)", value=True, key="skip_header")
+    with col_import_opts2:
+        sheet_index = st.number_input(
+            "Số thứ tự sheet (bắt đầu từ 0)",
+            min_value=0, max_value=50, value=0, step=1,
+            key="sheet_index",
+            help="Mặc định đọc sheet đầu tiên (0). Thay đổi nếu muốn đọc sheet khác."
+        )
+    
+    if uploaded_file is not None:
+        if st.button("📥 Import từ khóa", use_container_width=True, type="primary", key="btn_import_excel"):
+            try:
+                # Read excel file
+                df_excel = pd.read_excel(
+                    uploaded_file,
+                    sheet_name=int(sheet_index),
+                    header=0 if skip_header else None,
+                    usecols=[0],  # Only column A
+                    dtype=str,
+                    engine="openpyxl" if uploaded_file.name.endswith(".xlsx") else "xlrd",
+                )
+                
+                # Extract all non-empty values from column A
+                col_name = df_excel.columns[0]
+                raw_keywords = df_excel[col_name].dropna().astype(str).str.strip().tolist()
+                raw_keywords = [kw for kw in raw_keywords if kw and kw.lower() != "nan"]
+                
+                if not raw_keywords:
+                    st.warning("⚠️ Không tìm thấy từ khóa nào trong cột A của file Excel.")
+                else:
+                    added = 0
+                    skipped = 0
+                    for kw in raw_keywords:
+                        if kw not in st.session_state["keywords_list"]:
+                            st.session_state["keywords_list"].append(kw)
+                            added += 1
+                        else:
+                            skipped += 1
+                    
+                    if added > 0:
+                        st.success(
+                            f"✅ Đã import thành công **{added}** từ khóa!"
+                            + (f" ({skipped} từ khóa bị bỏ qua vì đã tồn tại)" if skipped > 0 else "")
+                        )
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.info(f"ℹ️ Tất cả {skipped} từ khóa trong file đã tồn tại trong danh sách.")
+            except Exception as e:
+                st.error(f"❌ Lỗi khi đọc file Excel: {e}")
+
 # Display keywords as tags
 if st.session_state["keywords_list"]:
+    st.markdown(f"**Danh sách từ khóa ({len(st.session_state['keywords_list'])}):**")
     cols = st.columns(min(len(st.session_state["keywords_list"]), 6))
     for idx, kw in enumerate(st.session_state["keywords_list"]):
         with cols[idx % 6]:
@@ -900,7 +1057,7 @@ if st.session_state["keywords_list"]:
         st.session_state["keywords_list"] = []
         st.rerun()
 else:
-    st.info("💡 Thêm ít nhất 1 từ khóa để bắt đầu tìm kiếm")
+    st.info("💡 Thêm ít nhất 1 từ khóa để bắt đầu tìm kiếm (nhập thủ công hoặc import từ file Excel)")
 
 # ============== SECTION 2: Filters ==============
 st.markdown('<div class="section-header">2. Bộ lọc</div>', unsafe_allow_html=True)
