@@ -952,6 +952,8 @@ if "keywords_list" not in st.session_state:
     st.session_state["keywords_list"] = []
 if "counts" not in st.session_state:
     st.session_state["counts"] = {}
+if "counts_df" not in st.session_state:
+    st.session_state["counts_df"] = pd.DataFrame()
 if "df_all" not in st.session_state:
     st.session_state["df_all"] = pd.DataFrame()
 
@@ -1144,35 +1146,112 @@ else:
     # Action buttons
     col_preview, col_fetch = st.columns(2)
     with col_preview:
-        preview_clicked = st.button("🔍 Xem số lượng kết quả", use_container_width=True)
+        preview_clicked = st.button("🔍 Kiểm tra số kết quả", use_container_width=True)
     with col_fetch:
         run_clicked = st.button("🚀 Tải dữ liệu", use_container_width=True, type="primary")
     
-    # Preview counts
+    # Preview counts - duyệt lần lượt từng từ khóa và hiển thị bảng kết quả
     if preview_clicked:
         session = make_session()
         last_ts = 0.0
         counts = {}
-        progress = st.progress(0, text="Đang kiểm tra...")
+        count_rows = []
+        progress = st.progress(0, text="Đang kiểm tra số kết quả trên PubMed...")
+        status_placeholder = st.empty()
+        
         for idx, kw in enumerate(st.session_state["keywords_list"]):
+            status_placeholder.info(f"🔍 Đang kiểm tra từ khóa {idx + 1}/{len(st.session_state['keywords_list'])}: **{kw}**")
             eutils_term = build_eutils_query(kw, text_filters, attr_filters, article_types, within_group_mode=within_group_mode)
             last_ts = _throttle(last_ts, cfg.requests_per_second)
             try:
                 c, _, _ = esearch_history(session, eutils_term, cfg, mindate=mindate, maxdate=maxdate)
                 counts[kw] = c
+                # Build PubMed search URL for this keyword
+                pubmed_search_url = f"https://pubmed.ncbi.nlm.nih.gov/?term={quote_plus(eutils_term)}"
+                if mindate:
+                    pubmed_search_url += f"&filter=dates.{mindate}-{maxdate}" if maxdate else ""
+                count_rows.append({
+                    "STT": idx + 1,
+                    "Từ khóa": kw,
+                    "Query gửi PubMed": eutils_term,
+                    "Số kết quả": c,
+                    "Link PubMed": pubmed_search_url,
+                })
             except Exception as e:
                 counts[kw] = f"Error: {e}"
+                count_rows.append({
+                    "STT": idx + 1,
+                    "Từ khóa": kw,
+                    "Query gửi PubMed": eutils_term,
+                    "Số kết quả": f"Lỗi: {e}",
+                    "Link PubMed": "",
+                })
             progress.progress((idx + 1) / len(st.session_state["keywords_list"]))
+        
         progress.empty()
+        status_placeholder.empty()
         st.session_state["counts"] = counts
+        st.session_state["counts_df"] = pd.DataFrame(count_rows)
     
-    # Display counts
-    if st.session_state["counts"]:
-        st.markdown("**Kết quả tìm kiếm:**")
-        count_cols = st.columns(min(len(st.session_state["counts"]), 4))
-        for idx, (kw, cnt) in enumerate(st.session_state["counts"].items()):
-            with count_cols[idx % 4]:
-                st.metric(label=kw, value=f"{cnt:,}" if isinstance(cnt, int) else cnt)
+    # Display counts as a detailed table
+    if not st.session_state["counts_df"].empty:
+        counts_df = st.session_state["counts_df"]
+        
+        # Summary metrics
+        numeric_counts = [v for v in st.session_state["counts"].values() if isinstance(v, int)]
+        error_count = sum(1 for v in st.session_state["counts"].values() if not isinstance(v, int))
+        
+        st.markdown("---")
+        st.markdown("**📊 Kết quả kiểm tra số lượng bài báo trên PubMed:**")
+        
+        summary_cols = st.columns(4)
+        with summary_cols[0]:
+            st.metric("Tổng từ khóa", f"{len(st.session_state['counts'])}")
+        with summary_cols[1]:
+            total_results = sum(numeric_counts) if numeric_counts else 0
+            st.metric("Tổng số kết quả", f"{total_results:,}")
+        with summary_cols[2]:
+            avg_results = int(total_results / len(numeric_counts)) if numeric_counts else 0
+            st.metric("Trung bình/từ khóa", f"{avg_results:,}")
+        with summary_cols[3]:
+            if error_count > 0:
+                st.metric("Lỗi", f"{error_count}", delta=f"-{error_count}", delta_color="inverse")
+            else:
+                st.metric("Trạng thái", "✅ Thành công")
+        
+        # Display the counts table
+        st.dataframe(
+            counts_df,
+            use_container_width=True,
+            hide_index=True,
+            height=min(400, 40 + 35 * len(counts_df)),
+            column_config={
+                "STT": st.column_config.NumberColumn("#", width="small"),
+                "Từ khóa": st.column_config.TextColumn("Từ khóa", width="medium"),
+                "Query gửi PubMed": st.column_config.TextColumn("Query", width="large"),
+                "Số kết quả": st.column_config.NumberColumn("Số kết quả", format="%d"),
+                "Link PubMed": st.column_config.LinkColumn("Link PubMed", display_text="🔗 Xem trên PubMed"),
+            }
+        )
+        
+        # Export counts to Excel
+        export_counts_col1, export_counts_col2 = st.columns([1, 3])
+        with export_counts_col1:
+            try:
+                xbuf_counts = io.BytesIO()
+                with pd.ExcelWriter(xbuf_counts, engine="openpyxl") as writer:
+                    counts_df.to_excel(writer, index=False, sheet_name="PubMed_Counts")
+                st.download_button(
+                    "📥 Tải bảng kết quả (Excel)",
+                    data=xbuf_counts.getvalue(),
+                    file_name="pubmed_keyword_counts.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+            except Exception as e:
+                st.warning(f"Không thể tạo file Excel: {e}")
+    
+    st.markdown("---")
     
     # Fetch data
     if run_clicked:
